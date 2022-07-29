@@ -32,8 +32,8 @@ jobs:
             DOCS_SLACK_MSG="Successfully published docs. https://docs.docker.com/"
           elif [ "${{ github.ref }}" = "refs/heads/lab" ]; then
             DOCS_URL="https://docs-lab.docker.com"
-            DOCS_S3_BUCKET=""
-            DOCS_LAMBDA_FUNCTION_CACHE=""
+            DOCS_AWS_IAM_ROLE="arn:aws:iam::710015040892:role/labs-docs-docker.github.io-20220728143917865600000003"
+            DOCS_S3_BUCKET="labs-docs-docker.github.io"
             DOCS_S3_CONFIG="_website-config-docs-lab.json"
           else
             echo >&2 "ERROR: unknown branch ${{ github.ref }}"
@@ -42,10 +42,15 @@ jobs:
           echo "JEKYLL_ENV=$JEKYLL_ENV" >> $GITHUB_ENV
           echo "DOCS_URL=$DOCS_URL" >> $GITHUB_ENV
           echo "DOCS_AWS_REGION=$DOCS_AWS_REGION" >> $GITHUB_ENV
+          echo "DOCS_AWS_IAM_ROLE=$DOCS_AWS_IAM_ROLE" >> $GITHUB_ENV
           echo "DOCS_S3_BUCKET=$DOCS_S3_BUCKET" >> $GITHUB_ENV
           echo "DOCS_S3_CONFIG=$DOCS_S3_CONFIG" >> $GITHUB_ENV
           echo "DOCS_LAMBDA_FUNCTION_CACHE=$DOCS_LAMBDA_FUNCTION_CACHE" >> $GITHUB_ENV
           echo "DOCS_SLACK_MSG=$DOCS_SLACK_MSG" >> $GITHUB_ENV
+          
+          # TODO: remove secrets once stage and prod environments have moved to OIDC auth
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
       -
         name: Checkout
         uses: actions/checkout@v3
@@ -61,12 +66,16 @@ jobs:
             *.cache-from=type=gha,scope=publish
             *.cache-to=type=gha,scope=publish,mode=max
       -
+        name: Configure AWS Credentials
+        if: ${{ env.DOCS_AWS_IAM_ROLE != '' }}
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ env.DOCS_AWS_IAM_ROLE }}
+          aws-region: ${{ env.DOCS_AWS_REGION }}
+      -
         name: Upload files to S3 bucket
         run: |
           aws --region ${{ env.DOCS_AWS_REGION }} s3 sync --acl public-read _site s3://${{ env.DOCS_S3_BUCKET }}/ --delete
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       -
         name: Update S3 config
         uses: docker/bake-action@v2
@@ -75,8 +84,6 @@ jobs:
           set: |
             *.cache-from=type=gha,scope=releaser
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ env.DOCS_AWS_REGION }}
           AWS_S3_BUCKET: ${{ env.DOCS_S3_BUCKET }}
           AWS_S3_CONFIG: ${{ env.DOCS_S3_CONFIG }}
@@ -89,8 +96,6 @@ jobs:
           set: |
             *.cache-from=type=gha,scope=releaser
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ env.DOCS_AWS_REGION }}
           AWS_LAMBDA_FUNCTION: ${{ env.DOCS_LAMBDA_FUNCTION_CACHE }}
       -
